@@ -50,10 +50,33 @@ begin
   request['Content-Type'] = 'application/json'
   request.body = JSON.generate(payload)
   response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 15) { |http| http.request(request) }
-  if response.is_a?(Net::HTTPSuccess)
-    puts "Lock request accepted (HTTP #{response.code}); physical lock state not verified."
-  else
+  unless response.is_a?(Net::HTTPSuccess)
     warn "Lock request failed (HTTP #{response.code})."
+    exit 1
+  end
+
+  begin
+    status_uri = URI("https://app.candyhouse.co/api/sesame2/#{uuid}")
+    5.times do
+      sleep 2
+      status_request = Net::HTTP::Get.new(status_uri)
+      status_request['x-api-key'] = api_key
+      status_response = Net::HTTP.start(status_uri.hostname, status_uri.port, use_ssl: true, open_timeout: 10, read_timeout: 15) { |http| http.request(status_request) }
+      unless status_response.is_a?(Net::HTTPSuccess)
+        warn "Lock request accepted, but status check failed (HTTP #{status_response.code})."
+        exit 1
+      end
+
+      status = JSON.parse(status_response.body).fetch('CHSesame2Status')
+      if status == 'locked'
+        puts 'SESAME reports that it is locked.'
+        exit 0
+      end
+    end
+    warn 'Lock request accepted, but SESAME did not report a locked state.'
+    exit 1
+  rescue StandardError => e
+    warn "Lock request accepted, but status check failed: #{e.class}"
     exit 1
   end
 rescue StandardError => e
